@@ -9,7 +9,6 @@ from nltk.tokenize import sent_tokenize
 import nltk
 import re
 
-# Try to download the necessary NLTK data for sentence tokenization
 try:
     nltk.download('punkt', quiet=True)
 except Exception as e:
@@ -45,9 +44,7 @@ def parse_arguments():
 
 def basic_sentence_tokenize(text):
     """Basic sentence tokenization as fallback if NLTK fails."""
-    # Replace common sentence-ending punctuation with period + newline
     text = re.sub(r'([.!?])\s+', r'\1\n', text)
-    # Split on newlines and filter out empty sentences
     sentences = [s.strip() for s in text.split('\n') if s.strip()]
     return sentences
 
@@ -63,21 +60,17 @@ def chunk_text(text, chunk_size=1):
         List of text chunks
     """
     try:
-        # Try to use NLTK's sentence tokenizer
         sentences = sent_tokenize(text)
     except Exception as e:
         print(f"Warning: NLTK sentence tokenization failed: {e}")
         sentences = basic_sentence_tokenize(text)
     
-    # Create chunks of sentences
     chunks = []
     for i in range(0, len(sentences), chunk_size):
         chunk = ' '.join(sentences[i:i+chunk_size])
         if chunk.strip():  # Only add non-empty chunks
             chunks.append(chunk)
     
-    # If we have no chunks (which might happen with very short texts), 
-    # just use the whole text as one chunk
     if not chunks and text.strip():
         chunks = [text]
     
@@ -95,7 +88,6 @@ def get_bert_embeddings(texts, model_name, cache_dir=None):
     Returns:
         Array of embeddings
     """
-    # Load model and tokenizer
     try:
         tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
         model = AutoModel.from_pretrained(model_name, cache_dir=cache_dir)
@@ -109,11 +101,9 @@ def get_bert_embeddings(texts, model_name, cache_dir=None):
         except Exception as e2:
             raise RuntimeError(f"Failed to load alternative model: {e2}")
     
-    # Check if CUDA is available
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
     
-    # Process in batches to avoid out-of-memory errors
     batch_size = 8
     embeddings = []
     
@@ -133,10 +123,8 @@ def get_bert_embeddings(texts, model_name, cache_dir=None):
         with torch.no_grad():
             model_output = model(**encoded_input)
             
-        # Use mean of last hidden state as sentence embedding
         sentence_embeddings = model_output.last_hidden_state.mean(dim=1)
         
-        # Move embeddings to CPU and convert to numpy
         embeddings.append(sentence_embeddings.cpu().numpy())
     
     return np.vstack(embeddings)
@@ -175,27 +163,22 @@ def detect_paraphrased_plagiarism(source_text, suspicious_text, threshold=0.8, m
     print("This may take a while for longer documents...")
     
     try:
-        # Get embeddings for all chunks
         all_chunks = source_chunks + suspicious_chunks
         all_embeddings = get_bert_embeddings(all_chunks, model_name, cache_dir)
         
-        # Split embeddings back into source and suspicious
         source_embeddings = all_embeddings[:len(source_chunks)]
         suspicious_embeddings = all_embeddings[len(source_chunks):]
         
-        # Calculate similarities
         print("Calculating similarities between chunks...")
         plagiarized_chunks = []
         chunk_similarities = []
         
         for i, sus_embedding in enumerate(suspicious_embeddings):
-            # Calculate similarity with all source chunks
             similarities = cosine_similarity(
                 sus_embedding.reshape(1, -1), 
                 source_embeddings
             ).flatten()
             
-            # Find best match
             max_similarity = similarities.max()
             max_source_idx = similarities.argmax()
             
@@ -209,7 +192,6 @@ def detect_paraphrased_plagiarism(source_text, suspicious_text, threshold=0.8, m
             
             chunk_similarities.append(chunk_info)
             
-            # If similarity is above threshold, mark as plagiarized
             if max_similarity >= threshold:
                 plagiarized_chunks.append({
                     'suspicious_chunk_idx': i,
@@ -219,7 +201,6 @@ def detect_paraphrased_plagiarism(source_text, suspicious_text, threshold=0.8, m
                     'similarity': max_similarity
                 })
         
-        # Calculate overall document similarity
         if chunk_similarities:
             overall_similarity = sum(info['similarity'] for info in chunk_similarities) / len(chunk_similarities)
             max_chunk_similarity = max(info['similarity'] for info in chunk_similarities)
@@ -247,13 +228,10 @@ def detect_paraphrased_plagiarism(source_text, suspicious_text, threshold=0.8, m
         }
 
 def main():
-    # Parse command line arguments
     args = parse_arguments()
     
-    # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Check if files exist
     if not os.path.exists(args.source):
         print(f"Error: Source file not found: {args.source}")
         return
@@ -263,17 +241,14 @@ def main():
         return
     
     try:
-        # Read the source document
         print(f"Reading source document: {args.source}")
         with open(args.source, 'r', encoding='utf-8', errors='ignore') as f:
             source_text = f.read()
         
-        # Read the suspicious document
         print(f"Reading suspicious document: {args.suspicious}")
         with open(args.suspicious, 'r', encoding='utf-8', errors='ignore') as f:
             suspicious_text = f.read()
         
-        # Detect plagiarism
         print("Analyzing documents for paraphrased plagiarism...")
         print(f"Using similarity threshold: {args.threshold}")
         print(f"Using BERT model: {args.model}")
@@ -288,13 +263,11 @@ def main():
             cache_dir=args.cache_dir
         )
         
-        # Display results
         print("\n=== PLAGIARISM DETECTION RESULTS ===")
         print(f"Overall Semantic Similarity: {result['overall_similarity']:.4f}")
         print(f"Maximum Chunk Similarity: {result['max_chunk_similarity']:.4f}")
         print(f"Detected Plagiarized Chunks: {len(result['plagiarized_chunks'])}/{len(result['all_chunk_similarities'])}")
         
-        # Save detailed results to file
         result_file = os.path.join(args.output_dir, 'bert_plagiarism_results.txt')
         with open(result_file, 'w', encoding='utf-8') as f:
             f.write("=== PLAGIARISM DETECTION RESULTS ===\n\n")
@@ -308,7 +281,6 @@ def main():
             f.write(f"Maximum Chunk Similarity: {result['max_chunk_similarity']:.4f}\n")
             f.write(f"Detected Plagiarized Chunks: {len(result['plagiarized_chunks'])}/{len(result['all_chunk_similarities'])}\n\n")
             
-            # Write detailed information about plagiarized chunks
             if result['plagiarized_chunks']:
                 f.write("=== DETECTED PLAGIARIZED CONTENT ===\n\n")
                 for i, chunk in enumerate(result['plagiarized_chunks']):
@@ -320,7 +292,6 @@ def main():
             else:
                 f.write("No plagiarized content detected above the threshold.\n")
         
-        # Save CSV with all chunk similarities for visualization
         csv_file = os.path.join(args.output_dir, 'bert_chunk_similarities.csv')
         similarities_df = pd.DataFrame(result['all_chunk_similarities'])
         similarities_df.to_csv(csv_file, index=False)
